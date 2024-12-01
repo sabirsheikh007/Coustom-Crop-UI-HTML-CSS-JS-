@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smooth Image Cropper</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .image-container {
+            flex: 1;
+            min-width: 300px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        .source-image-wrapper {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            overflow: hidden;
+            border: 2px solid #ddd;
+            background: #f8f8f8;
+        }
+
+        .image-stage {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            cursor: move;
+        }
+
+        #sourceImage {
+            position: absolute;
+            left: 0;
+            top: 0;
+            transform-origin: 0 0;
+            transition: transform 0.1s ease-out;
+            pointer-events: none;
+        }
+
+        .crop-box {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            border: 2px solid blue;
+            background: rgba(0, 0, 255, 0.1);
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+        }
+
+        #resultImage {
+            max-width: 100%;
+            max-height: 400px;
+            border: 2px solid #ddd;
+        }
+
+        button, select {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+
+        .zoom-controls {
+            margin: 10px 0;
+        }
+
+        #zoomLevel {
+            margin: 0 10px;
+        }
+    </style>
+</head>
+
+<body>
+<div class="container">
+    <div class="image-container">
+        <div class="controls">
+            <input type="file" id="imageInput" accept="image/*">
+            <select id="aspectRatio">
+                <option value="1:1">1:1 Square</option>
+                <option value="16:9">16:9 Landscape</option>
+                <option value="9:16">9:16 Portrait</option>
+                <option value="4:3">4:3</option>
+                <option value="3:4">3:4</option>
+            </select>
+            <div class="zoom-controls">
+                <button id="zoomOut">-</button>
+                <span id="zoomLevel">100%</span>
+                <button id="zoomIn">+</button>
+            </div>
+            <button id="resetBtn">Reset Image</button>
+            <button id="cropBtn">Crop Image</button>
+        </div>
+        <div class="source-image-wrapper">
+            <div class="image-stage" id="imageStage">
+                <img id="sourceImage" src="#" alt="Upload an image">
+            </div>
+            <div class="crop-box" id="cropBox"></div>
+        </div>
+    </div>
+
+    <div class="image-container">
+        <h3>Cropped Result</h3>
+        <img id="resultImage" src="#" alt="Cropped result will appear here">
+        <div class="image-container">
+        <h3>Crop Coordinates</h3>
+        <div id="cropCoordinates" style="padding: 10px; background: #f5f5f5; border-radius: 4px;">
+            <p>Source X: <span id="sourceXCoord">0</span></p>
+            <p>Source Y: <span id="sourceYCoord">0</span></p>
+            <p>Width: <span id="cropWidth">0</span></p>
+            <p>Height: <span id="cropHeight">0</span></p>
+            <p>Scale: <span id="cropScale">1</span></p>
+        </div>
+    </div>
+    </div>
+</div>
+<script>
+    const imageInput = document.getElementById('imageInput');
+    const sourceImage = document.getElementById('sourceImage');
+    const imageStage = document.getElementById('imageStage');
+    const cropBox = document.getElementById('cropBox');
+    const resultImage = document.getElementById('resultImage');
+    const aspectRatioSelect = document.getElementById('aspectRatio');
+    const cropBtn = document.getElementById('cropBtn');
+    const zoomIn = document.getElementById('zoomIn');
+    const zoomOut = document.getElementById('zoomOut');
+    const zoomLevelDisplay = document.getElementById('zoomLevel');
+    const resetBtn = document.getElementById('resetBtn');
+
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    let isDragging = false;
+    let startX, startY;
+    let initialTranslateX, initialTranslateY;
+
+    function getMinimumScale() {
+        const cropRect = cropBox.getBoundingClientRect();
+        const scaleX = cropRect.width / sourceImage.naturalWidth;
+        const scaleY = cropRect.height / sourceImage.naturalHeight;
+        return Math.max(scaleX, scaleY);
+    }
+
+    function initCropBox() {
+        const [width, height] = aspectRatioSelect.value.split(':').map(Number);
+        const baseSize = 200;
+        cropBox.style.width = `${baseSize}px`;
+        cropBox.style.height = `${baseSize * height / width}px`;
+
+        // If an image is loaded, ensure it covers the new crop box
+        if (sourceImage.src && sourceImage.complete) {
+            setTimeout(() => {
+                const minScale = getMinimumScale();
+
+                // If current scale is smaller than required, update it
+                if (scale < minScale) {
+                    updateZoom(minScale * 1.2);
+                } else {
+                    // Just constrain position for current scale
+                    constrainPosition();
+                }
+            }, 50);
+        }
+    }
+
+    function updateImageTransform() {
+        sourceImage.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})`;
+        zoomLevelDisplay.textContent = `${Math.round(scale * 100)}%`;
+    }
+
+    function constrainPosition() {
+        const cropRect = cropBox.getBoundingClientRect();
+        const stageRect = imageStage.getBoundingClientRect();
+        const scaledImageWidth = sourceImage.naturalWidth * scale;
+        const scaledImageHeight = sourceImage.naturalHeight * scale;
+
+        // Calculate crop box center relative to stage
+        const cropBoxCenterX = (stageRect.width - cropRect.width) / 2;
+        const cropBoxCenterY = (stageRect.height - cropRect.height) / 2;
+
+        // Calculate boundaries
+        const minX = cropBoxCenterX + cropRect.width - scaledImageWidth;
+        const maxX = cropBoxCenterX;
+        const minY = cropBoxCenterY + cropRect.height - scaledImageHeight;
+        const maxY = cropBoxCenterY;
+
+        // Constrain X position
+        if (translateX > maxX) translateX = maxX;
+        if (translateX < minX) translateX = minX;
+
+        // Constrain Y position
+        if (translateY > maxY) translateY = maxY;
+        if (translateY < minY) translateY = minY;
+
+        updateImageTransform();
+    }
+
+    function initializeImagePosition() {
+        const cropRect = cropBox.getBoundingClientRect();
+        const stageRect = imageStage.getBoundingClientRect();
+
+        // Calculate minimum scale needed to cover crop box
+        const minScale = getMinimumScale();
+        scale = minScale * 1.2;
+
+        // Calculate the position to center in crop box
+        const scaledImageWidth = sourceImage.naturalWidth * scale;
+        const scaledImageHeight = sourceImage.naturalHeight * scale;
+
+        // Calculate crop box center relative to stage
+        const cropBoxCenterX = (stageRect.width - cropRect.width) / 2;
+        const cropBoxCenterY = (stageRect.height - cropRect.height) / 2;
+
+        // Center image in crop box
+        translateX = cropBoxCenterX + (cropRect.width - scaledImageWidth) / 2;
+        translateY = cropBoxCenterY + (cropRect.height - scaledImageHeight) / 2;
+
+        constrainPosition();
+    }
+
+    function updateZoom(newScale) {
+        const cropRect = cropBox.getBoundingClientRect();
+        const stageRect = imageStage.getBoundingClientRect();
+
+        // Ensure new scale isn't smaller than minimum required
+        const minScale = getMinimumScale();
+        if (newScale < minScale) {
+            newScale = minScale;
+        }
+
+        // Calculate crop box center
+        const cropBoxCenterX = (stageRect.width - cropRect.width) / 2;
+        const cropBoxCenterY = (stageRect.height - cropRect.height) / 2;
+
+        // Calculate new dimensions
+        const newWidth = sourceImage.naturalWidth * newScale;
+        const newHeight = sourceImage.naturalHeight * newScale;
+
+        // Update scale
+        scale = newScale;
+
+        // Update position to maintain center
+        translateX = cropBoxCenterX + (cropRect.width - newWidth) / 2;
+        translateY = cropBoxCenterY + (cropRect.height - newHeight) / 2;
+
+        constrainPosition();
+    }
+
+    // Event Listeners
+    imageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                sourceImage.src = e.target.result;
+                sourceImage.onload = () => {
+                    initCropBox();
+                    setTimeout(initializeImagePosition, 50);
+                };
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    imageStage.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        initialTranslateX = translateX;
+        initialTranslateY = translateY;
+        imageStage.style.cursor = 'grabbing';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        translateX = initialTranslateX + dx;
+        translateY = initialTranslateY + dy;
+        constrainPosition();
+    });
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        imageStage.style.cursor = 'move';
+    });
+
+    zoomIn.addEventListener('click', () => {
+        const newScale = Math.min(scale + 0.1, 3);
+        updateZoom(newScale);
+    });
+
+    zoomOut.addEventListener('click', () => {
+        const minScale = getMinimumScale();
+        const newScale = Math.max(minScale, scale - 0.1);
+        updateZoom(newScale);
+    });
+
+    aspectRatioSelect.addEventListener('change', () => {
+        initCropBox();
+    });
+
+    resetBtn.addEventListener('click', () => {
+        if (sourceImage.src) {
+            initializeImagePosition();
+        }
+    });
+
+    imageStage.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        const minScale = getMinimumScale();
+        const newScale = Math.max(minScale, Math.min(3, scale + delta));
+
+        if (newScale !== scale) {
+            updateZoom(newScale);
+        }
+    });
+
+    cropBtn.addEventListener('click', () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const cropRect = cropBox.getBoundingClientRect();
+        const imageRect = sourceImage.getBoundingClientRect();
+
+        canvas.width = cropRect.width;
+        canvas.height = cropRect.height;
+
+        const cropCenterX = cropRect.left + cropRect.width / 2;
+        const cropCenterY = cropRect.top + cropRect.height / 2;
+        const imageCenterX = imageRect.left + imageRect.width / 2;
+        const imageCenterY = imageRect.top + imageRect.height / 2;
+
+        const offsetX = (cropCenterX - imageCenterX) / scale;
+        const offsetY = (cropCenterY - imageCenterY) / scale;
+
+        const sourceX = (sourceImage.naturalWidth / 2) - (cropRect.width / 2 / scale) + offsetX;
+        const sourceY = (sourceImage.naturalHeight / 2) - (cropRect.height / 2 / scale) + offsetY;
+        const sourceWidth = cropRect.width / scale;
+        const sourceHeight = cropRect.height / scale;
+
+        // Update coordinates display
+        document.getElementById('sourceXCoord').textContent = Math.round(sourceX);
+        document.getElementById('sourceYCoord').textContent = Math.round(sourceY);
+        document.getElementById('cropWidth').textContent = Math.round(sourceWidth);
+        document.getElementById('cropHeight').textContent = Math.round(sourceHeight);
+        document.getElementById('cropScale').textContent = scale.toFixed(2);
+
+        // Create crop data object for server
+        const cropData = {
+            x: Math.round(sourceX),
+            y: Math.round(sourceY),
+            width: Math.round(sourceWidth),
+            height: Math.round(sourceHeight),
+            scale: parseFloat(scale.toFixed(2))
+        };
+
+        // Log the data that would be sent to server
+        console.log('Crop Data for Server:', cropData);
+
+
+        ctx.drawImage(
+            sourceImage,
+            sourceX, sourceY,
+            sourceWidth, sourceHeight,
+            0, 0,
+            canvas.width, canvas.height
+        );
+
+        resultImage.src = canvas.toDataURL('image/png');
+    });
+    // Initialize
+    initCropBox();
+</script>
+</body>
+</html>
