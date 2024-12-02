@@ -46,6 +46,9 @@
             width: 100%;
             height: 100%;
             cursor: move;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
         #sourceImage {
@@ -126,15 +129,15 @@
         <h3>Cropped Result</h3>
         <img id="resultImage" src="#" alt="Cropped result will appear here">
         <div class="image-container">
-        <h3>Crop Coordinates</h3>
-        <div id="cropCoordinates" style="padding: 10px; background: #f5f5f5; border-radius: 4px;">
-            <p>Source X: <span id="sourceXCoord">0</span></p>
-            <p>Source Y: <span id="sourceYCoord">0</span></p>
-            <p>Width: <span id="cropWidth">0</span></p>
-            <p>Height: <span id="cropHeight">0</span></p>
-            <p>Scale: <span id="cropScale">1</span></p>
+            <h3>Crop Coordinates</h3>
+            <div id="cropCoordinates" style="padding: 10px; background: #f5f5f5; border-radius: 4px;">
+                <p>Source X: <span id="sourceXCoord">0</span></p>
+                <p>Source Y: <span id="sourceYCoord">0</span></p>
+                <p>Width: <span id="cropWidth">0</span></p>
+                <p>Height: <span id="cropHeight">0</span></p>
+                <p>Scale: <span id="cropScale">1</span></p>
+            </div>
         </div>
-    </div>
     </div>
 </div>
 <script>
@@ -156,6 +159,8 @@
     let isDragging = false;
     let startX, startY;
     let initialTranslateX, initialTranslateY;
+    let lastTouchDistance = 0;
+    let isMultiTouch = false;
 
     function getMinimumScale() {
         const cropRect = cropBox.getBoundingClientRect();
@@ -170,16 +175,12 @@
         cropBox.style.width = `${baseSize}px`;
         cropBox.style.height = `${baseSize * height / width}px`;
 
-        // If an image is loaded, ensure it covers the new crop box
         if (sourceImage.src && sourceImage.complete) {
             setTimeout(() => {
                 const minScale = getMinimumScale();
-
-                // If current scale is smaller than required, update it
                 if (scale < minScale) {
                     updateZoom(minScale * 1.2);
                 } else {
-                    // Just constrain position for current scale
                     constrainPosition();
                 }
             }, 50);
@@ -197,21 +198,16 @@
         const scaledImageWidth = sourceImage.naturalWidth * scale;
         const scaledImageHeight = sourceImage.naturalHeight * scale;
 
-        // Calculate crop box center relative to stage
         const cropBoxCenterX = (stageRect.width - cropRect.width) / 2;
         const cropBoxCenterY = (stageRect.height - cropRect.height) / 2;
 
-        // Calculate boundaries
         const minX = cropBoxCenterX + cropRect.width - scaledImageWidth;
         const maxX = cropBoxCenterX;
         const minY = cropBoxCenterY + cropRect.height - scaledImageHeight;
         const maxY = cropBoxCenterY;
 
-        // Constrain X position
         if (translateX > maxX) translateX = maxX;
         if (translateX < minX) translateX = minX;
-
-        // Constrain Y position
         if (translateY > maxY) translateY = maxY;
         if (translateY < minY) translateY = minY;
 
@@ -222,19 +218,15 @@
         const cropRect = cropBox.getBoundingClientRect();
         const stageRect = imageStage.getBoundingClientRect();
 
-        // Calculate minimum scale needed to cover crop box
         const minScale = getMinimumScale();
         scale = minScale * 1.2;
 
-        // Calculate the position to center in crop box
         const scaledImageWidth = sourceImage.naturalWidth * scale;
         const scaledImageHeight = sourceImage.naturalHeight * scale;
 
-        // Calculate crop box center relative to stage
         const cropBoxCenterX = (stageRect.width - cropRect.width) / 2;
         const cropBoxCenterY = (stageRect.height - cropRect.height) / 2;
 
-        // Center image in crop box
         translateX = cropBoxCenterX + (cropRect.width - scaledImageWidth) / 2;
         translateY = cropBoxCenterY + (cropRect.height - scaledImageHeight) / 2;
 
@@ -245,31 +237,25 @@
         const cropRect = cropBox.getBoundingClientRect();
         const stageRect = imageStage.getBoundingClientRect();
 
-        // Ensure new scale isn't smaller than minimum required
         const minScale = getMinimumScale();
         if (newScale < minScale) {
             newScale = minScale;
         }
 
-        // Calculate crop box center
         const cropBoxCenterX = (stageRect.width - cropRect.width) / 2;
         const cropBoxCenterY = (stageRect.height - cropRect.height) / 2;
 
-        // Calculate new dimensions
         const newWidth = sourceImage.naturalWidth * newScale;
         const newHeight = sourceImage.naturalHeight * newScale;
 
-        // Update scale
         scale = newScale;
 
-        // Update position to maintain center
         translateX = cropBoxCenterX + (cropRect.width - newWidth) / 2;
         translateY = cropBoxCenterY + (cropRect.height - newHeight) / 2;
 
         constrainPosition();
     }
 
-    // Event Listeners
     imageInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -306,6 +292,59 @@
     document.addEventListener('mouseup', () => {
         isDragging = false;
         imageStage.style.cursor = 'move';
+    });
+
+    imageStage.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (e.touches.length === 2) {
+            isMultiTouch = true;
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            lastTouchDistance = Math.hypot(
+                touch2.clientX - touch1.clientX,
+                touch2.clientY - touch1.clientY
+            );
+        } else if (e.touches.length === 1) {
+            isDragging = true;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            initialTranslateX = translateX;
+            initialTranslateY = translateY;
+        }
+    });
+
+    imageStage.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (e.touches.length === 2 && isMultiTouch) {
+            const touch1 = e.touches[0];
+            const touch2 = e.touches[1];
+            const currentDistance = Math.hypot(
+                touch2.clientX - touch1.clientX,
+                touch2.clientY - touch1.clientY
+            );
+
+            const delta = currentDistance - lastTouchDistance;
+            const zoomDelta = delta * 0.01;
+            const minScale = getMinimumScale();
+            const newScale = Math.max(minScale, Math.min(3, scale + zoomDelta));
+
+            if (newScale !== scale) {
+                updateZoom(newScale);
+            }
+
+            lastTouchDistance = currentDistance;
+        } else if (e.touches.length === 1 && isDragging) {
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
+            translateX = initialTranslateX + dx;
+            translateY = initialTranslateY + dy;
+            constrainPosition();
+        }
+    });
+
+    imageStage.addEventListener('touchend', (e) => {
+        isDragging = false;
+        isMultiTouch = false;
     });
 
     zoomIn.addEventListener('click', () => {
@@ -363,14 +402,12 @@
         const sourceWidth = cropRect.width / scale;
         const sourceHeight = cropRect.height / scale;
 
-        // Update coordinates display
         document.getElementById('sourceXCoord').textContent = Math.round(sourceX);
         document.getElementById('sourceYCoord').textContent = Math.round(sourceY);
         document.getElementById('cropWidth').textContent = Math.round(sourceWidth);
         document.getElementById('cropHeight').textContent = Math.round(sourceHeight);
         document.getElementById('cropScale').textContent = scale.toFixed(2);
 
-        // Create crop data object for server
         const cropData = {
             x: Math.round(sourceX),
             y: Math.round(sourceY),
@@ -379,9 +416,7 @@
             scale: parseFloat(scale.toFixed(2))
         };
 
-        // Log the data that would be sent to server
         console.log('Crop Data for Server:', cropData);
-
 
         ctx.drawImage(
             sourceImage,
@@ -393,7 +428,7 @@
 
         resultImage.src = canvas.toDataURL('image/png');
     });
-    // Initialize
+
     initCropBox();
 </script>
 </body>
